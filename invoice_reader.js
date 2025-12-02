@@ -69,6 +69,10 @@ function parseVendorBillLines(rawText, totals) {
   const items = [];
   const expenses = [];
 
+  console.log("=== RAW TEXT START ===");
+console.log(rawText);
+console.log("=== RAW TEXT END ===");
+
   // Extract between Items table header and "Tax PHP"
   const itemsBlockMatch = rawText.match(
     /Item\s+Quantity\s+Tax\s+Rate\s+Tax\s+Amt\s+Rate\s+Amount([\s\S]*?)Tax\s*PHP/i
