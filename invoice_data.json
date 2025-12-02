@@ -1,0 +1,15 @@
+{
+  "customerName": "LYDIA'S TICKE",
+  "dueDate": "11/27/2025",
+  "accountNo": "123-123456-123457",
+  "lineItems": [
+    {
+      "lineNo": 1,
+      "itemName": "MANAGEMENT FEE",
+      "uom": "ACT UNIT",
+      "quantity": 1,
+      "unitPrice": "224,000.00",
+      "amount": "224,000.00"
+    }
+  ]
+}
