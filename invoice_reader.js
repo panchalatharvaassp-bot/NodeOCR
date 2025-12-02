@@ -132,7 +132,7 @@ function parseVendorBillLines(rawText) {
     const dataRows = rows.filter((r) => !/Item\s+Quantity\s+Tax\s+Rate/i.test(r));
 
     for (const row of dataRows) {
-      // Expected pattern:
+      // Expected pattern (tune if your layout differs):
       // UN125NE-ORG 2 12% PHP19,392.90 PHP80,803.55 PHP161,607.10
       const m = row.match(
         /^(.+?)\s+(\d+)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
@@ -154,23 +154,33 @@ function parseVendorBillLines(rawText) {
 
   // ---------- EXPENSES TABLE ----------
   if (hasExpenses) {
-    // Take whole block (including newlines) so we can match across broken lines
+    // Grab block after "Expenses" until "Tax PHP"
     const expBlockMatch = rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i);
     const block = expBlockMatch ? expBlockMatch[1] : '';
 
-    // Regex over the whole block, not per line:
-    // (accountName... can contain newlines), then " 0% PHP0.00 PHP5,000.00"
-    const expenseRegex =
-      /(.+?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)/gs;
+    const rows = block
+      .split('\n')
+      .map((r) => r.trim())
+      .filter((r) => r);
 
-    let match;
-    while ((match = expenseRegex.exec(block)) !== null) {
-      const [, rawAccountName, taxRate, taxAmt, amount] = match;
+    // Skip header like "Account Tax Rate Tax Amt Amount"
+    const dataRows = rows.filter((r) => !/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount/i.test(r));
 
-      const accountName = rawAccountName.replace(/\s+/g, ' ').trim();
+    // New: strict regex for full account name + rate + tax + amount
+    const expenseRowRegex =
+      /^(.+?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/;
+
+    for (const row of dataRows) {
+      const m = row.match(expenseRowRegex);
+      if (!m) {
+        // If some weird split happens, we skip; fallback to totals may still save us
+        continue;
+      }
+
+      const [, accountName, taxRate, taxAmt, amount] = m;
 
       expenses.push({
-        accountName,
+        accountName: accountName.trim(),
         taxRatePercent: Number(taxRate),
         taxAmount: parsePhp(taxAmt),
         amount: parsePhp(amount)
@@ -182,6 +192,7 @@ function parseVendorBillLines(rawText) {
 }
 
 function parseVendorBillTotals(rawText) {
+  // These labels might shift slightly between templates; update if needed.
   const taxMatch = rawText.match(/Tax\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
   const amtMatch = rawText.match(/Amount\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
 
@@ -204,7 +215,8 @@ function normalizeDate(d) {
   if (!d) return null;
   const m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
   if (!m) {
-    return d; // if unknown format, return raw
+    // Unknown format – just return raw
+    return d;
   }
   const [, mm, dd, yyyy] = m;
   return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
