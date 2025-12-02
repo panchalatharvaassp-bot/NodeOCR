@@ -8,23 +8,22 @@ export async function extractInvoiceData(filePath) {
 
   // Keep line breaks for table parsing
   const rawText = data.text.replace(/\r/g, '');
-  // Flattened version for simple header regexes
+  // Flattened version for simpler header regexes
   const flatText = rawText.replace(/\s+/g, ' ').trim();
 
-  // We now ONLY support Vendor Bills
+  // We now assume every file is a Vendor Bill
   const vendorBillData = extractVendorBillData(rawText, flatText);
   return vendorBillData;
 }
 
-/* -------------------- VENDOR BILL PARSER -------------------- */
 /*
  * Returned JSON shape:
  * {
  *   transactionType: 'vendorbill',
  *   header: {
  *     docNumber,
- *     billDate,       // YYYY-MM-DD when possible
- *     dueDate,        // YYYY-MM-DD when possible
+ *     billDate,       // normalized YYYY-MM-DD when possible
+ *     dueDate,        // normalized YYYY-MM-DD when possible
  *     vendorName,
  *     subsidiaryName,
  *     termsName
@@ -56,13 +55,14 @@ function extractVendorBillData(rawText, flatText) {
     return m ? m[1].trim() : null;
   };
 
-  // ---- Header fields ----
-  // Example document number pattern: "#VENDBILL196"
+  // ---------- HEADER FIELDS ----------
+
+  // Example: "#VENDBILL196"
   const docNumber =
     getFlat(/#\s*(VENDBILL\d+)/i) ||
     getFlat(/Vendor Bill\s*#\s*(\S+)/i);
 
-  // Bill date – common formats like 03/27/2025
+  // Bill date – typical formats like 03/27/2025
   const billDateRaw =
     getFlat(/Bill\s*Date\s*[:\-]?\s*([0-9/.\-]+)/i) ||
     getFlat(/VENDBILL\d+\s*([0-9/.\-]+)/i);
@@ -75,10 +75,12 @@ function extractVendorBillData(rawText, flatText) {
   const billDate = normalizeDate(billDateRaw);
   const dueDate = normalizeDate(dueDateRaw);
 
-  // ---- Line details (Items & Expenses) ----
+  // ---------- LINES (ITEMS + EXPENSES) ----------
+
   const { items, expenses } = parseVendorBillLines(rawText);
 
-  // ---- Totals ----
+  // ---------- TOTALS ----------
+
   const totals = parseVendorBillTotals(rawText);
 
   return {
@@ -106,9 +108,10 @@ function parseVendorBillLines(rawText) {
   const hasItems = /Items\s*\n/i.test(rawText);
   const hasExpenses = /Expenses\s*\n/i.test(rawText);
 
-  // -------- Items table parsing --------
+  // ---------- ITEMS TABLE ----------
+
   if (hasItems) {
-    // Grab block after "Items" until "Tax PHP"
+    // Grab block after "Items" until "Tax PHP" (typical DES layout)
     const itemsBlockMatch = rawText.match(/Items\s*\n([\s\S]*?)Tax\s*PHP/i);
     const block = itemsBlockMatch ? itemsBlockMatch[1] : '';
 
@@ -121,12 +124,15 @@ function parseVendorBillLines(rawText) {
     const dataRows = rows.filter((r) => !/Item\s+Quantity\s+Tax\s+Rate/i.test(r));
 
     for (const row of dataRows) {
-      // Expected pattern (tune if your layout differs):
+      // Expected pattern (you can tweak once you see the exact text):
       // UN125NE-ORG 2 12% PHP19,392.90 PHP80,803.55 PHP161,607.10
       const m = row.match(
         /^(.+?)\s+(\d+)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
       );
-      if (!m) continue;
+      if (!m) {
+        // If some lines don’t match exactly, we just skip them.
+        continue;
+      }
 
       const [, itemName, qty, taxRate, taxAmt, rate, amount] = m;
 
@@ -141,7 +147,8 @@ function parseVendorBillLines(rawText) {
     }
   }
 
-  // -------- Expenses table parsing --------
+  // ---------- EXPENSES TABLE ----------
+
   if (hasExpenses) {
     // Grab block after "Expenses" until "Tax PHP"
     const expBlockMatch = rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i);
@@ -178,7 +185,7 @@ function parseVendorBillLines(rawText) {
 }
 
 function parseVendorBillTotals(rawText) {
-  // These labels may differ slightly; tweak after you inspect raw text
+  // These labels might shift slightly between templates; update if needed.
   const taxMatch = rawText.match(/Tax\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
   const amtMatch = rawText.match(/Amount\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
 
@@ -189,7 +196,7 @@ function parseVendorBillTotals(rawText) {
   };
 }
 
-/* -------------------- UTILS -------------------- */
+/* ---------- UTILS ---------- */
 
 function parsePhp(numStr) {
   if (!numStr) return 0;
@@ -200,7 +207,7 @@ function normalizeDate(d) {
   if (!d) return null;
   const m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
   if (!m) {
-    // Unknown format – return raw, NetSuite script can handle or ignore
+    // If it’s some weird format, just send raw and let NetSuite handle/ignore it
     return d;
   }
   const [, mm, dd, yyyy] = m;
