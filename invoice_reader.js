@@ -11,7 +11,6 @@ export async function extractInvoiceData(filePath) {
   // Flattened version for simpler header regexes
   const flatText = rawText.replace(/\s+/g, ' ').trim();
 
-  // We now assume every file is a Vendor Bill
   const vendorBillData = extractVendorBillData(rawText, flatText);
   return vendorBillData;
 }
@@ -20,27 +19,12 @@ export async function extractInvoiceData(filePath) {
  * Returned JSON shape:
  * {
  *   transactionType: 'vendorbill',
- *   header: {
- *     docNumber,
- *     billDate,
- *     dueDate,
- *     vendorName,
- *     subsidiaryName,
- *     termsName
- *   },
+ *   header: {...},
  *   lines: {
- *     items: [
- *       { itemName, quantity, taxRatePercent, taxAmount, rate, amount }
- *     ],
- *     expenses: [
- *       { accountName, taxRatePercent, taxAmount, amount }
- *     ]
+ *     items: [...],
+ *     expenses: [...]
  *   },
- *   totals: {
- *     taxTotal,
- *     amountTotal,
- *     currency: 'PHP'
- *   }
+ *   totals: {...}
  * }
  */
 
@@ -57,12 +41,10 @@ function extractVendorBillData(rawText, flatText) {
 
   // ---------- HEADER FIELDS ----------
 
-  // Example: "#VENDBILL194"
   const docNumber =
     getFlat(/#\s*(VENDBILL\d+)/i) ||
     getFlat(/Vendor Bill\s*#\s*(\S+)/i);
 
-  // Bill date – typical formats like 03/27/2025
   const billDateRaw =
     getFlat(/Bill\s*Date\s*[:\-]?\s*([0-9/.\-]+)/i) ||
     getFlat(/VENDBILL\d+\s*([0-9/.\-]+)/i);
@@ -75,22 +57,11 @@ function extractVendorBillData(rawText, flatText) {
   const billDate = normalizeDate(billDateRaw);
   const dueDate = normalizeDate(dueDateRaw);
 
-  // ---------- LINES (ITEMS + EXPENSES) ----------
-  const { items, expenses } = parseVendorBillLines(rawText);
-
-  // ---------- TOTALS ----------
+  // First get totals
   const totals = parseVendorBillTotals(rawText);
 
-  // Fallback: expense-only bills with one line → push totals to that line
-  if (items.length === 0 && expenses.length === 1) {
-    const line = expenses[0];
-    if (line.amount == null && totals.amountTotal != null) {
-      line.amount = totals.amountTotal;
-    }
-    if (line.taxAmount == null && totals.taxTotal != null) {
-      line.taxAmount = totals.taxTotal;
-    }
-  }
+  // Then parse lines with knowledge of totals for fallback
+  const { items, expenses } = parseVendorBillLines(rawText, totals);
 
   return {
     transactionType: 'vendorbill',
@@ -110,32 +81,29 @@ function extractVendorBillData(rawText, flatText) {
   };
 }
 
-function parseVendorBillLines(rawText) {
+function parseVendorBillLines(rawText, totals) {
   const items = [];
   const expenses = [];
 
-  const hasItems = /Items\s*\n/i.test(rawText);
-  const hasExpenses = /Expenses\s*\n/i.test(rawText);
-
   // ---------- ITEMS TABLE ----------
-  if (hasItems) {
-    // Grab block after "Items" until "Tax PHP"
-    const itemsBlockMatch = rawText.match(/Items\s*\n([\s\S]*?)Tax\s*PHP/i);
-    const block = itemsBlockMatch ? itemsBlockMatch[1] : '';
+  // Try to capture everything between the Item header and the Tax/Amount summary
+  const itemsBlockMatch = rawText.match(
+    /Item\s+Quantity\s+Tax\s+Rate\s+Tax\s+Amt\s+Rate\s+Amount([\s\S]*?)Tax\s*PHP/i
+  );
+
+  if (itemsBlockMatch) {
+    const block = itemsBlockMatch[1];
 
     const rows = block
       .split('\n')
       .map((r) => r.trim())
       .filter((r) => r);
 
-    // Skip header row like "Item Quantity Tax Rate Tax Amt Rate Amount"
-    const dataRows = rows.filter((r) => !/Item\s+Quantity\s+Tax\s+Rate/i.test(r));
-
-    for (const row of dataRows) {
-      // Expected pattern:
+    for (const row of rows) {
+      // Expected pattern (adjust if you see different layout):
       // UN125NE-ORG 2 12% PHP19,392.90 PHP80,803.55 PHP161,607.10
       const m = row.match(
-        /^(.+?)\s+(\d+)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
+        /^(.+?)\s+(\d+(?:\.\d+)?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
       );
       if (!m) continue;
 
@@ -153,52 +121,59 @@ function parseVendorBillLines(rawText) {
   }
 
   // ---------- EXPENSES TABLE ----------
-  if (hasExpenses) {
-    // Grab block after "Expenses" until "Tax PHP" (or end if not found)
-    const expBlockMatch =
-      rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i) ||
-      rawText.match(/Expenses\s*\n([\s\S]*)$/i);
+  // Similar header-based capture for Expenses
+  const expBlockMatch = rawText.match(
+    /Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount([\s\S]*?)Tax\s*PHP/i
+  ) || rawText.match(/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount([\s\S]*)$/i);
 
-    const block = expBlockMatch ? expBlockMatch[1] : '';
+  if (expBlockMatch) {
+    const block = expBlockMatch[1];
 
     const rows = block
       .split('\n')
       .map((r) => r.trim())
       .filter((r) => r);
 
-    // Remove header-like rows
-    const dataRows = rows.filter(
-      (r) => !/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount/i.test(r)
-    );
+    for (const row of rows) {
+      // Expected pattern:
+      // 14306 Repairs and Maintenance Cost : RME Cost - Miscellaneous 0% PHP0.00 PHP5,000.00
+      const m = row.match(
+        /^(.+?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
+      );
+      if (!m) continue;
 
-    if (dataRows.length > 0) {
-      // For your current use case, we assume ONE expense line.
-      // Join everything into one string to reconstruct the full account.
-      const joined = dataRows.join(' ');
-
-      // Try to separate account name from the numeric tail.
-      // We stop at the first " 0%"/" 12%" or " PHP" pattern if present.
-      let accountName = joined;
-
-      const splitByPercent = joined.split(/\s+\d+%\s+/);
-      if (splitByPercent.length > 1) {
-        accountName = splitByPercent[0];
-      } else {
-        const idxPhp = joined.indexOf(' PHP');
-        if (idxPhp > 0) {
-          accountName = joined.substring(0, idxPhp);
-        }
-      }
-
-      accountName = accountName.replace(/\s+/g, ' ').trim();
+      const [, accountName, taxRate, taxAmt, amount] = m;
 
       expenses.push({
-        accountName,
-        taxRatePercent: null, // we can ignore this for now
-        taxAmount: null,      // will be filled from totals if single-line
-        amount: null          // will be filled from totals if single-line
+        accountName: accountName.trim(),
+        taxRatePercent: Number(taxRate),
+        taxAmount: parsePhp(taxAmt),
+        amount: parsePhp(amount)
       });
     }
+  }
+
+  // ---------- FALLBACKS ----------
+
+  // If we have no items and exactly one expense, but amounts are missing, use totals
+  if (items.length === 0 && expenses.length === 1) {
+    const line = expenses[0];
+    if (line.amount == null && totals.amountTotal != null) {
+      line.amount = totals.amountTotal;
+    }
+    if (line.taxAmount == null && totals.taxTotal != null) {
+      line.taxAmount = totals.taxTotal;
+    }
+  }
+
+  // If we still have absolutely nothing, create one synthetic expense line from totals
+  if (items.length === 0 && expenses.length === 0 && totals.amountTotal != null) {
+    expenses.push({
+      accountName: 'AUTO-GENERATED FROM TOTALS',
+      taxRatePercent: null,
+      taxAmount: totals.taxTotal ?? null,
+      amount: totals.amountTotal
+    });
   }
 
   return { items, expenses };
@@ -209,4 +184,24 @@ function parseVendorBillTotals(rawText) {
   const amtMatch = rawText.match(/Amount\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
 
   return {
-    taxTotal
+    taxTotal: taxMatch ? parsePhp(taxMatch[1]) : null,
+    amountTotal: amtMatch ? parsePhp(amtMatch[1]) : null,
+    currency: 'PHP'
+  };
+}
+
+/* ---------- UTILS ---------- */
+
+function parsePhp(numStr) {
+  if (!numStr) return null;
+  const n = Number(numStr.replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeDate(d) {
+  if (!d) return null;
+  const m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (!m) return d;
+  const [, mm, dd, yyyy] = m;
+  return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+}
