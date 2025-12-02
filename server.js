@@ -31,8 +31,8 @@ app.post('/parse', async (req, res) => {
     const invoiceData = await extractInvoiceData(tempPath);
     fs.unlinkSync(tempPath);
 
-    console.log(`✅ Successfully processed invoice: ${fileName}`);
-    res.json({ success: true, invoiceData });
+console.log(`✅ Successfully processed vendor bill: ${fileName}`);
+  res.json({ success: true, invoiceData });
   } catch (err) {
     console.error('❌ Parse Error:', err);
     res.status(500).json({ success: false, error: err.message });
