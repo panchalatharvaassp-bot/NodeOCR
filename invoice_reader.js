@@ -5,68 +5,204 @@ import pdf from 'pdf-parse';
 export async function extractInvoiceData(filePath) {
   const dataBuffer = await fs.readFile(filePath);
   const data = await pdf(dataBuffer);
-  const text = data.text.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
 
-  const getMatch = (regex) => {
-    const match = text.match(regex);
-    return match ? match[1].trim() : null;
+  // Keep line breaks for table parsing
+  const rawText = data.text.replace(/\r/g, '');
+  // Flattened version for simple header regexes
+  const flatText = rawText.replace(/\s+/g, ' ').trim();
+
+  // We now ONLY support Vendor Bills
+  const vendorBillData = extractVendorBillData(rawText, flatText);
+  return vendorBillData;
+}
+
+/* -------------------- VENDOR BILL PARSER -------------------- */
+/*
+ * Returned JSON shape:
+ * {
+ *   transactionType: 'vendorbill',
+ *   header: {
+ *     docNumber,
+ *     billDate,       // YYYY-MM-DD when possible
+ *     dueDate,        // YYYY-MM-DD when possible
+ *     vendorName,
+ *     subsidiaryName,
+ *     termsName
+ *   },
+ *   lines: {
+ *     items: [
+ *       { itemName, quantity, taxRatePercent, taxAmount, rate, amount }
+ *     ],
+ *     expenses: [
+ *       { accountName, taxRatePercent, taxAmount, amount }
+ *     ]
+ *   },
+ *   totals: {
+ *     taxTotal,
+ *     amountTotal,
+ *     currency: 'PHP'
+ *   }
+ * }
+ */
+
+function extractVendorBillData(rawText, flatText) {
+  const getFlat = (regex) => {
+    const m = flatText.match(regex);
+    return m ? m[1].trim() : null;
+  };
+
+  const getRaw = (regex) => {
+    const m = rawText.match(regex);
+    return m ? m[1].trim() : null;
   };
 
   // ---- Header fields ----
-  const customerName = getMatch(/CUSTOMER\s*NAME\s*[:\-]?\s*(.+?)(?=\s*DUE\s*DATE|TIN|ADDRESS|$)/i);
-  const dueDate = getMatch(/DUE\s*DATE\s*[:\-]?\s*([0-9/.\-]+)/i);
-  const accountNo = getMatch(/AC\s*NO\.?\s*[:\-]?\s*([0-9\-]+)/i);
+  // Example document number pattern: "#VENDBILL196"
+  const docNumber =
+    getFlat(/#\s*(VENDBILL\d+)/i) ||
+    getFlat(/Vendor Bill\s*#\s*(\S+)/i);
 
-  // ---- Line items ----
-  const sectionMatch = text.match(/NO\.? *DESCRIPTION *UOM *QTY *UNIT *PRICE *AMOUNT\s+([\s\S]*?)(?:VATABLE SALES|TOTAL SALES|AMOUNT DUE|AMOUNT TO PAY)/i);
-  const lineSection = sectionMatch ? sectionMatch[1].trim() : '';
-  const lineItems = [];
+  // Bill date – common formats like 03/27/2025
+  const billDateRaw =
+    getFlat(/Bill\s*Date\s*[:\-]?\s*([0-9/.\-]+)/i) ||
+    getFlat(/VENDBILL\d+\s*([0-9/.\-]+)/i);
 
-  if (lineSection) {
-    const itemRegex = /(\d+)\s*([A-Z0-9\s,.'\-]+?)\s*([\d,]+\.\d{2})\s*P?\s*([\d,]+\.\d{2})/gi;
-    let m;
-    const KNOWN_UOMS = ['ACT UNIT', 'UNIT', 'BAG', 'PCS', 'PC', 'EA'];
+  const vendorName = getRaw(/Vendor:\s*(.+?)(?=\s+Subsidiary:|\s+Due\s*Date:|$)/i);
+  const subsidiaryName = getRaw(/Subsidiary:\s*(.+?)(?=\s+Due\s*Date:|\s+Terms:|$)/i);
+  const dueDateRaw = getFlat(/Due\s*Date\s*[:\-]?\s*([0-9/.\-]+)/i);
+  const termsName = getFlat(/Terms\s*[:\-]?\s*(.+?)(?=\s+[0-9/.\-]|$)/i);
 
-    while ((m = itemRegex.exec(lineSection)) !== null) {
-      const lineNo = parseInt(m[1], 10);
-      let description = m[2].trim();
-      description = description.replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+  const billDate = normalizeDate(billDateRaw);
+  const dueDate = normalizeDate(dueDateRaw);
 
-      let unitPrice = m[3].trim();
-      const amount = m[4].trim();
+  // ---- Line details (Items & Expenses) ----
+  const { items, expenses } = parseVendorBillLines(rawText);
 
-      // fix malformed data
-      if (unitPrice.length === amount.length + 1 && unitPrice.endsWith(amount)) {
-        unitPrice = amount;
-      }
+  // ---- Totals ----
+  const totals = parseVendorBillTotals(rawText);
 
-      // --- extract UOM ---
-      let uom = null;
-      const upperDesc = description.toUpperCase().replace(/\s+/g, ' ');
-      for (const candidate of KNOWN_UOMS) {
-        const idx = upperDesc.lastIndexOf(candidate);
-        if (idx !== -1 && idx >= upperDesc.length - candidate.length - 1) {
-          uom = candidate;
-          description = description.slice(0, idx).trim();
-          break;
-        }
-      }
+  return {
+    transactionType: 'vendorbill',
+    header: {
+      docNumber: docNumber || null,
+      billDate,
+      dueDate,
+      vendorName: vendorName || null,
+      subsidiaryName: subsidiaryName || null,
+      termsName: termsName || null
+    },
+    lines: {
+      items,
+      expenses
+    },
+    totals
+  };
+}
 
-      lineItems.push({
-        lineNo,
-        itemName: description,
-        uom,
-        quantity: 1,
-        unitPrice,
-        amount
+function parseVendorBillLines(rawText) {
+  const items = [];
+  const expenses = [];
+
+  const hasItems = /Items\s*\n/i.test(rawText);
+  const hasExpenses = /Expenses\s*\n/i.test(rawText);
+
+  // -------- Items table parsing --------
+  if (hasItems) {
+    // Grab block after "Items" until "Tax PHP"
+    const itemsBlockMatch = rawText.match(/Items\s*\n([\s\S]*?)Tax\s*PHP/i);
+    const block = itemsBlockMatch ? itemsBlockMatch[1] : '';
+
+    const rows = block
+      .split('\n')
+      .map((r) => r.trim())
+      .filter((r) => r);
+
+    // Skip header row like "Item Quantity Tax Rate Tax Amt Rate Amount"
+    const dataRows = rows.filter((r) => !/Item\s+Quantity\s+Tax\s+Rate/i.test(r));
+
+    for (const row of dataRows) {
+      // Expected pattern (tune if your layout differs):
+      // UN125NE-ORG 2 12% PHP19,392.90 PHP80,803.55 PHP161,607.10
+      const m = row.match(
+        /^(.+?)\s+(\d+)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
+      );
+      if (!m) continue;
+
+      const [, itemName, qty, taxRate, taxAmt, rate, amount] = m;
+
+      items.push({
+        itemName: itemName.trim(),
+        quantity: Number(qty),
+        taxRatePercent: Number(taxRate),
+        taxAmount: parsePhp(taxAmt),
+        rate: parsePhp(rate),
+        amount: parsePhp(amount)
       });
     }
   }
 
+  // -------- Expenses table parsing --------
+  if (hasExpenses) {
+    // Grab block after "Expenses" until "Tax PHP"
+    const expBlockMatch = rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i);
+    const block = expBlockMatch ? expBlockMatch[1] : '';
+
+    const rows = block
+      .split('\n')
+      .map((r) => r.trim())
+      .filter((r) => r);
+
+    // Skip header like "Account Tax Rate Tax Amt Amount"
+    const dataRows = rows.filter((r) => !/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount/i.test(r));
+
+    for (const row of dataRows) {
+      // Pattern: account name (can have spaces) + taxRate + taxAmt + amount
+      const tokens = row.split(/\s+/);
+      if (tokens.length < 4) continue;
+
+      const amountStr = tokens[tokens.length - 1];
+      const taxAmtStr = tokens[tokens.length - 2];
+      const taxRateStr = tokens[tokens.length - 3];
+      const accountName = tokens.slice(0, -3).join(' ');
+
+      expenses.push({
+        accountName: accountName.trim(),
+        taxRatePercent: Number(taxRateStr.replace('%', '')) || 0,
+        taxAmount: parsePhp(taxAmtStr.replace(/^PHP/i, '')),
+        amount: parsePhp(amountStr.replace(/^PHP/i, ''))
+      });
+    }
+  }
+
+  return { items, expenses };
+}
+
+function parseVendorBillTotals(rawText) {
+  // These labels may differ slightly; tweak after you inspect raw text
+  const taxMatch = rawText.match(/Tax\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
+  const amtMatch = rawText.match(/Amount\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
+
   return {
-    customerName: customerName?.replace(/\s*[:\-]+$/, '').trim() || null,
-    dueDate,
-    accountNo,
-    lineItems
+    taxTotal: taxMatch ? parsePhp(taxMatch[1]) : null,
+    amountTotal: amtMatch ? parsePhp(amtMatch[1]) : null,
+    currency: 'PHP'
   };
+}
+
+/* -------------------- UTILS -------------------- */
+
+function parsePhp(numStr) {
+  if (!numStr) return 0;
+  return Number(numStr.replace(/,/g, ''));
+}
+
+function normalizeDate(d) {
+  if (!d) return null;
+  const m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (!m) {
+    // Unknown format – return raw, NetSuite script can handle or ignore
+    return d;
+  }
+  const [, mm, dd, yyyy] = m;
+  return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
 }
