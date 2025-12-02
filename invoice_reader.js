@@ -22,8 +22,8 @@ export async function extractInvoiceData(filePath) {
  *   transactionType: 'vendorbill',
  *   header: {
  *     docNumber,
- *     billDate,       // normalized YYYY-MM-DD when possible
- *     dueDate,        // normalized YYYY-MM-DD when possible
+ *     billDate,
+ *     dueDate,
  *     vendorName,
  *     subsidiaryName,
  *     termsName
@@ -57,7 +57,7 @@ function extractVendorBillData(rawText, flatText) {
 
   // ---------- HEADER FIELDS ----------
 
-  // Example: "#VENDBILL196"
+  // Example: "#VENDBILL194"
   const docNumber =
     getFlat(/#\s*(VENDBILL\d+)/i) ||
     getFlat(/Vendor Bill\s*#\s*(\S+)/i);
@@ -76,12 +76,21 @@ function extractVendorBillData(rawText, flatText) {
   const dueDate = normalizeDate(dueDateRaw);
 
   // ---------- LINES (ITEMS + EXPENSES) ----------
-
   const { items, expenses } = parseVendorBillLines(rawText);
 
   // ---------- TOTALS ----------
-
   const totals = parseVendorBillTotals(rawText);
+
+  // Fallback: expense-only bills with one line → push totals to that line
+  if (items.length === 0 && expenses.length === 1) {
+    const line = expenses[0];
+    if (line.amount == null && totals.amountTotal != null) {
+      line.amount = totals.amountTotal;
+    }
+    if (line.taxAmount == null && totals.taxTotal != null) {
+      line.taxAmount = totals.taxTotal;
+    }
+  }
 
   return {
     transactionType: 'vendorbill',
@@ -109,9 +118,8 @@ function parseVendorBillLines(rawText) {
   const hasExpenses = /Expenses\s*\n/i.test(rawText);
 
   // ---------- ITEMS TABLE ----------
-
   if (hasItems) {
-    // Grab block after "Items" until "Tax PHP" (typical DES layout)
+    // Grab block after "Items" until "Tax PHP"
     const itemsBlockMatch = rawText.match(/Items\s*\n([\s\S]*?)Tax\s*PHP/i);
     const block = itemsBlockMatch ? itemsBlockMatch[1] : '';
 
@@ -124,15 +132,12 @@ function parseVendorBillLines(rawText) {
     const dataRows = rows.filter((r) => !/Item\s+Quantity\s+Tax\s+Rate/i.test(r));
 
     for (const row of dataRows) {
-      // Expected pattern (you can tweak once you see the exact text):
+      // Expected pattern (tune if your layout differs):
       // UN125NE-ORG 2 12% PHP19,392.90 PHP80,803.55 PHP161,607.10
       const m = row.match(
         /^(.+?)\s+(\d+)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
       );
-      if (!m) {
-        // If some lines don’t match exactly, we just skip them.
-        continue;
-      }
+      if (!m) continue;
 
       const [, itemName, qty, taxRate, taxAmt, rate, amount] = m;
 
@@ -148,7 +153,6 @@ function parseVendorBillLines(rawText) {
   }
 
   // ---------- EXPENSES TABLE ----------
-
   if (hasExpenses) {
     // Grab block after "Expenses" until "Tax PHP"
     const expBlockMatch = rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i);
@@ -162,21 +166,24 @@ function parseVendorBillLines(rawText) {
     // Skip header like "Account Tax Rate Tax Amt Amount"
     const dataRows = rows.filter((r) => !/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount/i.test(r));
 
-    for (const row of dataRows) {
-      // Pattern: account name (can have spaces) + taxRate + taxAmt + amount
-      const tokens = row.split(/\s+/);
-      if (tokens.length < 4) continue;
+    // New: strict regex for full account name + rate + tax + amount
+    const expenseRowRegex =
+      /^(.+?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/;
 
-      const amountStr = tokens[tokens.length - 1];
-      const taxAmtStr = tokens[tokens.length - 2];
-      const taxRateStr = tokens[tokens.length - 3];
-      const accountName = tokens.slice(0, -3).join(' ');
+    for (const row of dataRows) {
+      const m = row.match(expenseRowRegex);
+      if (!m) {
+        // If some weird split happens, we skip; fallback to totals may still save us
+        continue;
+      }
+
+      const [, accountName, taxRate, taxAmt, amount] = m;
 
       expenses.push({
         accountName: accountName.trim(),
-        taxRatePercent: Number(taxRateStr.replace('%', '')) || 0,
-        taxAmount: parsePhp(taxAmtStr.replace(/^PHP/i, '')),
-        amount: parsePhp(amountStr.replace(/^PHP/i, ''))
+        taxRatePercent: Number(taxRate),
+        taxAmount: parsePhp(taxAmt),
+        amount: parsePhp(amount)
       });
     }
   }
@@ -199,15 +206,16 @@ function parseVendorBillTotals(rawText) {
 /* ---------- UTILS ---------- */
 
 function parsePhp(numStr) {
-  if (!numStr) return 0;
-  return Number(numStr.replace(/,/g, ''));
+  if (!numStr) return null;
+  const n = Number(numStr.replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
 }
 
 function normalizeDate(d) {
   if (!d) return null;
   const m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
   if (!m) {
-    // If it’s some weird format, just send raw and let NetSuite handle/ignore it
+    // Unknown format – just return raw
     return d;
   }
   const [, mm, dd, yyyy] = m;
