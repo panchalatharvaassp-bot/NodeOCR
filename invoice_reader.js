@@ -30,16 +30,10 @@ function extractVendorBillData(rawText, flatText) {
     getFlat(/Bill\s*Date\s*[:\-]?\s*([0-9/.\-]+)/i) ||
     getFlat(/VENDBILL\d+\s*([0-9/.\-]+)/i);
 
-  const vendorName = getRaw(
-    /Vendor:\s*(.+?)(?=\s+Subsidiary:|\s+Due\s*Date:|$)/i
-  );
-  const subsidiaryName = getRaw(
-    /Subsidiary:\s*(.+?)(?=\s+Due\s*Date:|\s+Terms:|$)/i
-  );
+  const vendorName = getRaw(/Vendor:\s*(.+?)(?=\s+Subsidiary:|\s+Due\s*Date:|$)/i);
+  const subsidiaryName = getRaw(/Subsidiary:\s*(.+?)(?=\s+Due\s*Date:|\s+Terms:|$)/i);
   const dueDateRaw = getFlat(/Due\s*Date\s*[:\-]?\s*([0-9/.\-]+)/i);
-  const termsName = getFlat(
-    /Terms\s*[:\-]?\s*(.+?)(?=\s+[0-9/.\-]|$)/i
-  );
+  const termsName = getFlat(/Terms\s*[:\-]?\s*(.+?)(?=\s+[0-9/.\-]|$)/i);
 
   const billDate = normalizeDate(billDateRaw);
   const dueDate = normalizeDate(dueDateRaw);
@@ -69,43 +63,35 @@ function parseVendorBillLines(rawText, totals) {
   const items = [];
   const expenses = [];
 
-  console.log("=== RAW TEXT START ===");
-console.log(rawText);
-console.log("=== RAW TEXT END ===");
-
-  // Extract between Items table header and "Tax PHP"
+  // Extract everything between the header and the "Tax PHP" totals
   const itemsBlockMatch = rawText.match(
-    /Item\s+Quantity\s+Tax\s+Rate\s+Tax\s+Amt\s+Rate\s+Amount([\s\S]*?)Tax\s*PHP/i
+    /ItemQuantityTax\s*RateTax\s*AmtRateAmount([\s\S]*?)Tax\s*PHP/i
   );
-
   if (itemsBlockMatch) {
     let block = itemsBlockMatch[1]
       .split("\n")
       .map((l) => l.trim())
       .filter((l) => l);
 
-    // Combine broken lines: if a line doesn't end with a digit, % or PHP-value → append to previous
+    // Merge wrapped lines: join any line that doesn't contain "PHP" 3 times
     const merged = [];
     for (const line of block) {
-      if (
-        merged.length &&
-        !/(\d|%|PHP\d|\.00)$/.test(line)
-      ) {
+      const phpCount = (line.match(/PHP/gi) || []).length;
+      if (merged.length && phpCount < 3) {
         merged[merged.length - 1] += " " + line;
       } else {
         merged.push(line);
       }
     }
 
-    // Now parse each merged line
+    // Now extract structured fields
     for (const row of merged) {
       const m = row.match(
-        /^(.+?)\s+(\d+(?:\.\d+)?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
+        /^(.+?)\s+(\d+(?:\.\d+)?)\s*(\d+)%\s*PHP([\d,]+\.\d+|0\.00)\s*PHP([\d,]+\.\d+|0\.00)\s*PHP([\d,]+\.\d+|0\.00)$/i
       );
       if (!m) continue;
 
       const [, itemName, qty, taxRate, taxAmt, rate, amount] = m;
-
       items.push({
         itemName: itemName.trim(),
         quantity: Number(qty),
@@ -117,7 +103,7 @@ console.log("=== RAW TEXT END ===");
     }
   }
 
-  // fallback: add synthetic expense line if no items
+  // Fallback for expense-only vendor bills
   if (items.length === 0 && totals.amountTotal != null) {
     expenses.push({
       accountName: "AUTO-GENERATED FROM TOTALS",
@@ -133,6 +119,7 @@ console.log("=== RAW TEXT END ===");
 function parseVendorBillTotals(rawText) {
   const taxMatch = rawText.match(/Tax\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
   const amtMatch = rawText.match(/Amount\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
+
   return {
     taxTotal: taxMatch ? parsePhp(taxMatch[1]) : null,
     amountTotal: amtMatch ? parsePhp(amtMatch[1]) : null,
@@ -140,9 +127,12 @@ function parseVendorBillTotals(rawText) {
   };
 }
 
+/* ---------- UTILS ---------- */
+
 function parsePhp(numStr) {
   if (!numStr) return null;
-  return Number(numStr.replace(/,/g, ""));
+  const n = Number(numStr.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 function normalizeDate(d) {
