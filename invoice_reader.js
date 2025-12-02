@@ -132,7 +132,7 @@ function parseVendorBillLines(rawText) {
     const dataRows = rows.filter((r) => !/Item\s+Quantity\s+Tax\s+Rate/i.test(r));
 
     for (const row of dataRows) {
-      // Expected pattern (tune if your layout differs):
+      // Expected pattern:
       // UN125NE-ORG 2 12% PHP19,392.90 PHP80,803.55 PHP161,607.10
       const m = row.match(
         /^(.+?)\s+(\d+)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/
@@ -154,8 +154,11 @@ function parseVendorBillLines(rawText) {
 
   // ---------- EXPENSES TABLE ----------
   if (hasExpenses) {
-    // Grab block after "Expenses" until "Tax PHP"
-    const expBlockMatch = rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i);
+    // Grab block after "Expenses" until "Tax PHP" (or end if not found)
+    const expBlockMatch =
+      rawText.match(/Expenses\s*\n([\s\S]*?)Tax\s*PHP/i) ||
+      rawText.match(/Expenses\s*\n([\s\S]*)$/i);
+
     const block = expBlockMatch ? expBlockMatch[1] : '';
 
     const rows = block
@@ -163,27 +166,37 @@ function parseVendorBillLines(rawText) {
       .map((r) => r.trim())
       .filter((r) => r);
 
-    // Skip header like "Account Tax Rate Tax Amt Amount"
-    const dataRows = rows.filter((r) => !/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount/i.test(r));
+    // Remove header-like rows
+    const dataRows = rows.filter(
+      (r) => !/Account\s+Tax\s+Rate\s+Tax\s+Amt\s+Amount/i.test(r)
+    );
 
-    // New: strict regex for full account name + rate + tax + amount
-    const expenseRowRegex =
-      /^(.+?)\s+(\d+)%\s+PHP([\d,]+\.\d+|0\.00)\s+PHP([\d,]+\.\d+|0\.00)$/;
+    if (dataRows.length > 0) {
+      // For your current use case, we assume ONE expense line.
+      // Join everything into one string to reconstruct the full account.
+      const joined = dataRows.join(' ');
 
-    for (const row of dataRows) {
-      const m = row.match(expenseRowRegex);
-      if (!m) {
-        // If some weird split happens, we skip; fallback to totals may still save us
-        continue;
+      // Try to separate account name from the numeric tail.
+      // We stop at the first " 0%"/" 12%" or " PHP" pattern if present.
+      let accountName = joined;
+
+      const splitByPercent = joined.split(/\s+\d+%\s+/);
+      if (splitByPercent.length > 1) {
+        accountName = splitByPercent[0];
+      } else {
+        const idxPhp = joined.indexOf(' PHP');
+        if (idxPhp > 0) {
+          accountName = joined.substring(0, idxPhp);
+        }
       }
 
-      const [, accountName, taxRate, taxAmt, amount] = m;
+      accountName = accountName.replace(/\s+/g, ' ').trim();
 
       expenses.push({
-        accountName: accountName.trim(),
-        taxRatePercent: Number(taxRate),
-        taxAmount: parsePhp(taxAmt),
-        amount: parsePhp(amount)
+        accountName,
+        taxRatePercent: null, // we can ignore this for now
+        taxAmount: null,      // will be filled from totals if single-line
+        amount: null          // will be filled from totals if single-line
       });
     }
   }
@@ -192,32 +205,8 @@ function parseVendorBillLines(rawText) {
 }
 
 function parseVendorBillTotals(rawText) {
-  // These labels might shift slightly between templates; update if needed.
   const taxMatch = rawText.match(/Tax\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
   const amtMatch = rawText.match(/Amount\s*PHP\s*([\d,]+\.\d+|0\.00)/i);
 
   return {
-    taxTotal: taxMatch ? parsePhp(taxMatch[1]) : null,
-    amountTotal: amtMatch ? parsePhp(amtMatch[1]) : null,
-    currency: 'PHP'
-  };
-}
-
-/* ---------- UTILS ---------- */
-
-function parsePhp(numStr) {
-  if (!numStr) return null;
-  const n = Number(numStr.replace(/,/g, ''));
-  return Number.isFinite(n) ? n : null;
-}
-
-function normalizeDate(d) {
-  if (!d) return null;
-  const m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
-  if (!m) {
-    // Unknown format – just return raw
-    return d;
-  }
-  const [, mm, dd, yyyy] = m;
-  return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
-}
+    taxTotal
