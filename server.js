@@ -28,7 +28,11 @@ app.post('/parse', async (req, res) => {
     const tempPath = `./temp_${Date.now()}_${fileName}`;
     fs.writeFileSync(tempPath, Buffer.from(fileData, 'base64'));
 
-    const invoiceData = await main(tempPath);
+    // console.log(tempPath)
+
+    console.log(fileData)
+
+    const invoiceData = await main(fileData);
     fs.unlinkSync(tempPath);
 
 console.log(`✅ Successfully processed vendor bill: ${fileName}`);
@@ -41,4 +45,3 @@ console.log(`✅ Successfully processed vendor bill: ${fileName}`);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
