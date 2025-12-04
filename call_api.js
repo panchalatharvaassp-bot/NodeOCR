@@ -33,9 +33,11 @@ export async function main(base64) {
     ],
   });
 
-  console.log(response)
+  // console.log(response)
   // Display output text
-  console.log(response.text);
+  // console.log(response.text);
+
+  return response.text
 }
 
 // main().catch(console.error);
