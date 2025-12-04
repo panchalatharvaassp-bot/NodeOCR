@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
-import { extractInvoiceData } from './invoice_reader.js';
+import { main } from './call_api.js';
 
 const app = express();
 app.use(cors());
@@ -28,7 +28,7 @@ app.post('/parse', async (req, res) => {
     const tempPath = `./temp_${Date.now()}_${fileName}`;
     fs.writeFileSync(tempPath, Buffer.from(fileData, 'base64'));
 
-    const invoiceData = await extractInvoiceData(tempPath);
+    const invoiceData = await main(tempPath);
     fs.unlinkSync(tempPath);
 
 console.log(`✅ Successfully processed vendor bill: ${fileName}`);
@@ -41,3 +41,4 @@ console.log(`✅ Successfully processed vendor bill: ${fileName}`);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
