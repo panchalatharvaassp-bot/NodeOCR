@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 
 const ai = new GoogleGenAI({
-  apiKey: "AIzaSyB60sZWo9-wMeF5fRCXDMugAiwa-qiawaQ",
+  apiKey: "AIzaSyBcb6yNhJPRoc2YC_CVpaiB-FTzUj_4VD0",
 });
 
 export async function main(base64) {
@@ -13,6 +13,7 @@ export async function main(base64) {
   // console.log(base64Pdf.length)
 
 //   Send request to Gemini
+// console.log(base64, 'base64')
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: [
