@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 
 const ai = new GoogleGenAI({
-  apiKey: "AIzaSyBcb6yNhJPRoc2YC_CVpaiB-FTzUj_4VD0",
+  apiKey: "AIzaSyBJtq5lgYs7aWhm5zgERHNytm0hzKiK2i0",
 });
 
 export async function main(base64) {
@@ -24,7 +24,7 @@ export async function main(base64) {
             text: `You are a data extraction model that identifies the transaction type and extracts only the information required to create that transaction in NetSuite.
 
             Return your answer **strictly** in JSON format following this exact structure — regardless of the transaction type.
-                      
+
             {
               "transaction_type": "<Transaction Type Name>",
               "netsuite_transaction_data": {
@@ -38,7 +38,7 @@ export async function main(base64) {
                 ]
               }
             }
-                      
+
             Rules:
             1. Always include both "body" and "items" keys inside "netsuite_transaction_data".
             2. Do not include any explanatory text, commentary, or formatting outside of JSON.
