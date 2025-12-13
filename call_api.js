@@ -58,5 +58,3 @@ export async function main(base64) {
 
   return response.text
 }
-
-main()
