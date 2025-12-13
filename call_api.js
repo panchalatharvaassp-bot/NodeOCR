@@ -1,19 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
+import dotenv from 'dotenv'
+
+dotenv.config()
 
 const ai = new GoogleGenAI({
-  apiKey: "AIzaSyCN5nkLNpc3cBIfrNg5KSObaAe6XxOh-hc",
+  apiKey: process.env.GOOGLE_API_KEY,
 });
 
 export async function main(base64) {
-  // Read PDF file and convert to Base64
-  // const pdfBytes = fs.readFileSync("./Transaction.pdf");
-  // const base64Pdf = pdfBytes.toString("base64");
-
-  // console.log(base64Pdf.length)
-
-//   Send request to Gemini
-// console.log(base64, 'base64')
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: [
@@ -64,4 +59,4 @@ export async function main(base64) {
   return response.text
 }
 
-// main().catch(console.error);
+main()
