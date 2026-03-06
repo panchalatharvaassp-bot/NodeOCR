@@ -16,30 +16,116 @@ export async function main(base64) {
         role: "user",
         parts: [
           {
-            text: `You are a data extraction model that identifies the transaction type and extracts only the information required to create that transaction in NetSuite.
+            text: `
+You are an AI system designed to extract accounting transaction data from documents and structure it for NetSuite ERP.
 
-            Return your answer **strictly** in JSON format following this exact structure — regardless of the transaction type.
+Your task:
+1. Identify the transaction type in the document.
+2. Extract ONLY the fields required to create the transaction in NetSuite.
+3. Return the result strictly as valid JSON.
 
-            {
-              "transaction_type": "<Transaction Type Name>",
-              "netsuite_transaction_data": {
-                "body": {
-                  // All header-level fields (subsidiary, entity, dates, memo, terms, etc.)
-                },
-                "items": [
-                  {
-                    // Line-level fields (item name/description, quantity, rate, amount, tax code, etc.)
-                  }
-                ]
-              }
-            }
+Supported transaction types:
+- Vendor Bill
+- Invoice
+- Purchase Order
+- Sales Order
+- Credit Memo
+- Vendor Credit
+- Expense Report
 
-            Rules:
-            1. Always include both "body" and "items" keys inside "netsuite_transaction_data".
-            2. Do not include any explanatory text, commentary, or formatting outside of JSON.
-            3. Keep the key names clean and consistent with NetSuite terminology (e.g., "subsidiary", "entity", "tranDate", "memo", "amount").
-            4. If a field does not exist, omit it rather than returning null or empty strings.
-            5. The final output must be **valid JSON**.`,
+Output format (must match exactly):
+
+{
+  "transaction_type": "<Transaction Type Name>",
+  "netsuite_transaction_data": {
+    "body": {
+      // Header-level fields only
+      // Examples: subsidiary, entity, tranDate, dueDate, terms, memo, currency, externalid
+    },
+    "items": [
+      {
+        // Line-level fields only
+        // Examples: item, description, quantity, rate, amount, taxcode, department, class, location
+      }
+    ]
+  }
+}
+
+Extraction Rules:
+
+1. Always include:
+   - transaction_type
+   - netsuite_transaction_data
+   - body
+   - items
+
+2. Use NetSuite field names where possible:
+   Header fields:
+   - subsidiary
+   - entity
+   - tranDate
+   - dueDate
+   - memo
+   - terms
+   - currency
+   - externalid
+
+3. Item line fields:
+   - item
+   - description
+   - quantity
+   - rate
+   - amount
+   - taxcode
+
+4. Only extract fields that are clearly present in the document.
+   Do NOT guess values.
+
+5. If line items exist, extract them exactly as listed.
+
+6. If the document does not contain line items, return an empty array.
+
+7. Do NOT include totals inside items unless they appear as a line.
+
+8. Ignore:
+   - company addresses
+   - bank details
+   - logos
+   - footer notes
+   - payment instructions
+
+9. The final output must be **valid JSON only**.
+   Do not include explanations, markdown, or comments.
+
+Example output:
+
+{
+  "transaction_type": "Vendor Bill",
+  "netsuite_transaction_data": {
+    "body": {
+      "entity": "Motorola",
+      "subsidiary": "Honeycomb Holdings Inc.",
+      "tranDate": "2025-09-11",
+      "dueDate": "2025-10-11",
+      "terms": "Net 30"
+    },
+    "items": [
+      {
+        "item": "ACC00008",
+        "quantity": 1,
+        "rate": 45,
+        "amount": 45
+      },
+      {
+        "item": "FAM00001",
+        "quantity": 1,
+        "rate": 12500,
+        "amount": 12500
+      }
+    ]
+  }
+}
+`
           },
           {
             inlineData: {
