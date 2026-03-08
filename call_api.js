@@ -35,20 +35,38 @@ Supported transaction types:
 
 Output format (must match exactly):
 
+// {
+//   "transaction_type": "<Transaction Type Name>",
+//   "netsuite_transaction_data": {
+//       // Header level data
+
+//     // "body": {
+//     //   // Header-level fields only
+//     //   // Examples: subsidiary, entity, tranDate, dueDate, terms, memo, currency, externalid
+//     // },
+//     // "items": [
+//     //   {
+//     //     // Line-level fields only
+//     //     // Examples: item, description, quantity, rate, amount, taxcode, department, class, location
+//     //   }
+//     // ]
+
+//   }
+// }
+
 {
-  "transaction_type": "<Transaction Type Name>",
-  "netsuite_transaction_data": {
-    "body": {
-      // Header-level fields only
-      // Examples: subsidiary, entity, tranDate, dueDate, terms, memo, currency, externalid
-    },
+    "transaction_type": "<Transaction Type Name such that record.load can be directly used in suitescript>"
+    // Body level data goes here 
     "items": [
-      {
-        // Line-level fields only
-        // Examples: item, description, quantity, rate, amount, taxcode, department, class, location
-      }
+        {
+            // Line level data goes here
+        }
+    ],
+    "expenses": [
+        {
+            // Expense line level data goes here (if applicable)
+        }
     ]
-  }
 }
 
 Extraction Rules:
