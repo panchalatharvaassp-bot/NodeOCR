@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType MapReduceScript
  */
-define(['N/search', 'N/file', 'N/https', 'N/log', 'N/record'], (search, file, https, log, record) => {
+define(['N/search', 'N/file', 'N/https', 'N/log', 'N/record', 'N/runtime'], (search, file, https, log, record, runtime) => {
 
   const TARGET_PATH = "SuiteScripts/Pdf's/Unprocessed";
   const NODE_API_URL = 'https://nodeocr-1e73.onrender.com/parse';
@@ -96,6 +96,30 @@ define(['N/search', 'N/file', 'N/https', 'N/log', 'N/record'], (search, file, ht
         if (key in obj) return true;
         return Object.values(obj).some(value => keyExists(value, key));
       };
+
+      const transactionCustomRecord = record.create({
+        type: "customrecord_inv_custom_record",
+        isDynamic: true
+      })
+
+      transactionCustomRecord.setValue({
+        fieldId: 'name',
+        value: `Transaction - ${transactionData.transaction_type} - ${new Date().toISOString()}`
+      })
+
+      transactionCustomRecord.setValue({
+        fieldId:'custrecord_payload',
+        value: JSON.stringify(transactionData)
+      })
+
+      const transactionCustomRecordId = transactionCustomRecord.save({
+        enableSourcing: true,
+        ignoreMandatoryFields: false
+      })
+
+      log.audit('Custom Record Created', `ID: ${transactionCustomRecordId}`);
+
+      log.debug('runtime.getCurrentScript().getRemainingUsage()', runtime.getCurrentScript().getRemainingUsage())
 
       // if (transactionData.transaction_type.toLowerCase().includes("invoice")) {
       //   const invoiceCustomRecord = record.create({

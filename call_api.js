@@ -36,7 +36,7 @@ Supported transaction types:
 Output format (must match exactly):
 
 {
-    "transaction_type": "<Transaction Type Name such that record.load can be directly used in SuiteScript>",
+    "transaction_type": "<Transaction Type name must be all underlowercase and no gaps such between text (Example: 'vendorbill', 'salesorder', 'expensereport', 'invoice')>",
     // ONLY the fields fields required to create the transaction in NetSuite.
     "items": [
         {

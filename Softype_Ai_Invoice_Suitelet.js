@@ -3,8 +3,11 @@
  * @NScriptType Suitelet
  */
 define(['N/ui/serverWidget', 'N/file', 'N/task', 'N/log', 'N/search'], (ui, file, task, log, search) => {
-  
+
   const TARGET_PATH = "SuiteScripts/Pdf's/Unprocessed";
+
+  const BULK_APPROVE_SCRIPT_ID  = 'customscript_softype_ai_bulk_approve';
+  const BULK_APPROVE_DEPLOY_ID  = 'customdeploy_softype_ai_bulk_approve';
 
   /**
  * Dynamically resolves a folder ID from its full path.
@@ -76,6 +79,17 @@ function getFolderIdByPath(path) {
             border-radius: 6px;
             cursor: pointer;
           }
+          #bulkApproveBtn {
+            margin-top: 20px;
+            margin-left: 12px;
+            background: #2e7d32;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+          }
+          #bulkApproveBtn:disabled { background: #a5d6a7; cursor: not-allowed; }
         </style>
 
         <div id="dropzone">
@@ -84,6 +98,7 @@ function getFolderIdByPath(path) {
           <input id="fileInput" type="file" name="files" accept="application/pdf" multiple>
         </div>
         <button id="submitBtn" type="button">Upload & Process</button>
+        <button id="bulkApproveBtn" type="button">Bulk Approve</button>
 
         <script>
           const dz = document.getElementById('dropzone');
@@ -114,10 +129,47 @@ function getFolderIdByPath(path) {
               .then(t => alert(t))
               .catch(err => alert('Upload failed: ' + err));
           });
+
+          const bulkApproveBtn = document.getElementById('bulkApproveBtn');
+          bulkApproveBtn.addEventListener('click', () => {
+            if (!confirm('Are you sure you want to bulk approve all pending transactions?')) return;
+            bulkApproveBtn.disabled = true;
+            bulkApproveBtn.textContent = 'Triggering...';
+
+            fetch(window.location.href + '&action=bulkApprove', { method: 'POST', body: new FormData() })
+              .then(r => r.text())
+              .then(t => {
+                alert(t);
+                bulkApproveBtn.disabled = false;
+                bulkApproveBtn.textContent = 'Bulk Approve';
+              })
+              .catch(err => {
+                alert('Bulk Approve failed: ' + err);
+                bulkApproveBtn.disabled = false;
+                bulkApproveBtn.textContent = 'Bulk Approve';
+              });
+          });
         </script>
       `;
 
       context.response.writePage(form);
+    }
+
+    // Handle bulk approve trigger
+    else if (context.request.method === 'POST' && context.request.parameters.action === 'bulkApprove') {
+      try {
+        const mrTask = task.create({
+          taskType: task.TaskType.MAP_REDUCE,
+          scriptId: BULK_APPROVE_SCRIPT_ID,
+          deploymentId: BULK_APPROVE_DEPLOY_ID
+        });
+        const taskId = mrTask.submit();
+        log.audit('Bulk Approve MapReduce Triggered', taskId);
+        context.response.write(`✅ Bulk Approve job triggered successfully. Task ID: ${taskId}`);
+      } catch (e) {
+        log.error('Bulk Approve Error', e);
+        context.response.write(`❌ Bulk Approve failed: ${e.message}`);
+      }
     }
 
     // Handle file uploads
