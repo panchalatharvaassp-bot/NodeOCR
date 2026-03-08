@@ -35,36 +35,26 @@ Supported transaction types:
 
 Output format (must match exactly):
 
-// {
-//   "transaction_type": "<Transaction Type Name>",
-//   "netsuite_transaction_data": {
-//       // Header level data
-
-//     // "body": {
-//     //   // Header-level fields only
-//     //   // Examples: subsidiary, entity, tranDate, dueDate, terms, memo, currency, externalid
-//     // },
-//     // "items": [
-//     //   {
-//     //     // Line-level fields only
-//     //     // Examples: item, description, quantity, rate, amount, taxcode, department, class, location
-//     //   }
-//     // ]
-
-//   }
-// }
-
 {
-    "transaction_type": "<Transaction Type Name such that record.load can be directly used in suitescript>"
-    // Body level data goes here 
+    "transaction_type": "<Transaction Type Name such that record.load can be directly used in SuiteScript>",
+    // ONLY the fields fields required to create the transaction in NetSuite.
     "items": [
         {
-            // Line level data goes here
+            "item": "",
+            "description": "",
+            "quantity": "",
+            "rate": "",
+            "amount": "",
+            "taxcode": ""
         }
     ],
     "expenses": [
         {
-            // Expense line level data goes here (if applicable)
+            "account": "",
+            "category": "",
+            "amount": "",
+            "memo": "",
+            "taxcode": ""
         }
     ]
 }
@@ -73,12 +63,14 @@ Extraction Rules:
 
 1. Always include:
    - transaction_type
-   - netsuite_transaction_data
-   - body
    - items
+   - expenses
 
-2. Use NetSuite field names where possible:
-   Header fields:
+2. Body level fields must appear at the top level of the JSON.
+
+3. Use NetSuite field names where possible.
+
+4. Header fields that may appear:
    - subsidiary
    - entity
    - tranDate
@@ -88,7 +80,7 @@ Extraction Rules:
    - currency
    - externalid
 
-3. Item line fields:
+5. Item line fields:
    - item
    - description
    - quantity
@@ -96,52 +88,60 @@ Extraction Rules:
    - amount
    - taxcode
 
-4. Only extract fields that are clearly present in the document.
+6. Expense line fields:
+   - account
+   - category
+   - amount
+   - memo
+   - taxcode
+
+7. Only extract fields clearly present in the document.
    Do NOT guess values.
 
-5. If line items exist, extract them exactly as listed.
+8. If line items exist, extract them exactly as listed.
 
-6. If the document does not contain line items, return an empty array.
+9. If the document does not contain line items, return:
+   "items": []
 
-7. Do NOT include totals inside items unless they appear as a line.
+10. If the document does not contain expenses, return:
+   "expenses": []
 
-8. Ignore:
+11. Do NOT include totals inside items unless they appear as a line item.
+
+12. Ignore:
    - company addresses
    - bank details
    - logos
    - footer notes
    - payment instructions
 
-9. The final output must be **valid JSON only**.
-   Do not include explanations, markdown, or comments.
+13. The final output must be valid JSON only.
+Do not include explanations, markdown, or comments.
 
 Example output:
 
 {
   "transaction_type": "Vendor Bill",
-  "netsuite_transaction_data": {
-    "body": {
-      "entity": "Motorola",
-      "subsidiary": "Honeycomb Holdings Inc.",
-      "tranDate": "2025-09-11",
-      "dueDate": "2025-10-11",
-      "terms": "Net 30"
+  "entity": "Motorola",
+  "subsidiary": "Honeycomb Holdings Inc.",
+  "tranDate": "2025-09-11",
+  "dueDate": "2025-10-11",
+  "terms": "Net 30",
+  "items": [
+    {
+      "item": "ACC00008",
+      "quantity": 1,
+      "rate": 45,
+      "amount": 45
     },
-    "items": [
-      {
-        "item": "ACC00008",
-        "quantity": 1,
-        "rate": 45,
-        "amount": 45
-      },
-      {
-        "item": "FAM00001",
-        "quantity": 1,
-        "rate": 12500,
-        "amount": 12500
-      }
-    ]
-  }
+    {
+      "item": "FAM00001",
+      "quantity": 1,
+      "rate": 12500,
+      "amount": 12500
+    }
+  ],
+  "expenses": []
 }
 `
           },

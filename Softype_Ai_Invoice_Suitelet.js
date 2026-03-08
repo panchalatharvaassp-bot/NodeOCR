@@ -107,7 +107,7 @@ function getFolderIdByPath(path) {
           submitBtn.addEventListener('click', () => {
             if (files.length === 0) return alert('Please select at least one PDF.');
             const formData = new FormData();
-            files.forEach(f => formData.append('files', f));
+            files.forEach((f, i) => formData.append('file_' + i, f));
 
             fetch(window.location.href, { method: 'POST', body: formData })
               .then(r => r.text())
@@ -127,6 +127,8 @@ function getFolderIdByPath(path) {
         log.debug("Folder Id", folderId)
         const uploadedFiles = [];
         const files = context.request.files || {};
+
+        log.debug("files", files)
 
         Object.keys(files).forEach((k) => {
           const f = files[k];
